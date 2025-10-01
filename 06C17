@@ -1,0 +1,76 @@
+const int LED_PIN = 7; 
+
+
+unsigned long g_period_us = 10000; 
+int g_duty_percent = 0;         
+
+
+void set_period(int period) {
+    if (period >= 100 && period <= 100000) {
+        g_period_us = (unsigned long)period;
+    }
+}
+
+void set_duty(int duty) {
+    if (duty >= 0 && duty <= 100) {
+        g_duty_percent = duty;
+    }
+}
+
+void generate_pwm_pulse() {
+    unsigned long on_time_us = g_period_us * g_duty_percent / 100; 
+    unsigned long off_time_us = g_period_us - on_time_us;                        
+
+    if (g_duty_percent == 100) {
+        digitalWrite(LED_PIN, LOW);
+        delayMicroseconds(g_period_us);
+        return;
+    } else if (g_duty_percent == 0) {
+        digitalWrite(LED_PIN, HIGH);
+        delayMicroseconds(g_period_us);
+        return;
+    }
+
+    digitalWrite(LED_PIN, LOW);
+    delayMicroseconds(on_time_us);
+
+    digitalWrite(LED_PIN, HIGH);
+    delayMicroseconds(off_time_us);
+}
+
+void setup() {
+    pinMode(LED_PIN, OUTPUT);
+    digitalWrite(LED_PIN, HIGH); 
+    
+    // 녹화용 Period 설정
+    //set_period(1000000); 
+    //set_period(1000);
+    set_period(100);
+}
+
+void loop() {
+    // 밝기 변화 속도는 1초로 고정
+    const unsigned long FADE_TIME_MS = 1000; 
+    const int FADE_STEPS = 100;              
+    const unsigned long DELAY_PER_STEP_MS = FADE_TIME_MS / FADE_STEPS; // 10ms
+
+    // 1. 페이드 인
+    for (int duty = 0; duty <= 100; duty++) {
+        set_duty(duty);
+        unsigned long start_time = millis();
+        
+        while (millis() - start_time < DELAY_PER_STEP_MS) { 
+             generate_pwm_pulse();
+        }
+    }
+
+    // 2. 페이드 아웃
+    for (int duty = 99; duty >= 1; duty--) {
+        set_duty(duty);
+        unsigned long start_time = millis();
+        
+        while (millis() - start_time < DELAY_PER_STEP_MS) {
+            generate_pwm_pulse();
+        }
+    }
+}
