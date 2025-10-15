@@ -1,0 +1,118 @@
+// Arduino pin assignment
+#define PIN_LED  9
+#define PIN_TRIG 12
+#define PIN_ECHO 13
+
+// configurable parameters
+#define SND_VEL 346.0     // sound velocity at 24 celsius degree (unit: m/sec)
+#define INTERVAL 25       // sampling interval (unit: msec)
+#define PULSE_DURATION 10 // ultra-sound Pulse Duration (unit: usec)
+#define _DIST_MIN 100     // minimum distance to be measured (unit: mm)
+#define _DIST_MAX 300     // maximum distance to be measured (unit: mm)
+
+#define TIMEOUT ((INTERVAL / 2) * 1000.0) // maximum echo waiting time (unit: usec)
+#define SCALE (0.001 * 0.5 * SND_VEL)     // coefficent to convert duration to distance
+
+// configurable parameters (
+#define MEDIAN_SIZE 30
+// global variables
+float median_readings[MEDIAN_SIZE]; // 최근 N개의 측정값을 저장할 배열
+int reading_index = 0;              // 배열 인덱스 관리
+// global variables
+unsigned long last_sampling_time;   // unit: msec
+//float dist_prev = _DIST_MAX;        // Distance last-measured
+//float dist_ema;                     // EMA distance
+
+
+float get_median_distance(float arr[], int size) {
+
+  float temp_arr[size];
+  for (int i = 0; i < size; i++) {
+    temp_arr[i] = arr[i];
+  }
+
+
+  for (int i = 0; i < size - 1; i++) {
+    for (int j = 0; j < size - i - 1; j++) {
+      if (temp_arr[j] > temp_arr[j + 1]) {
+        // 값 교환 (Swap)
+        float temp = temp_arr[j];
+        temp_arr[j] = temp_arr[j + 1];
+        temp_arr[j + 1] = temp;
+      }
+    }
+  }
+
+
+  if (size % 2 != 0) {
+    // 홀수 크기: 중앙 인덱스의 값 반환
+    return temp_arr[size / 2];
+  } else {
+    // 짝수 크기: 중앙의 두 값의 평균 반환
+    int mid1 = (size / 2) - 1;
+    int mid2 = size / 2;
+    return (temp_arr[mid1] + temp_arr[mid2]) / 2.0;
+  }
+}
+
+float USS_measure(int TRIG, int ECHO)
+{
+  digitalWrite(TRIG, HIGH);
+  delayMicroseconds(PULSE_DURATION);
+  digitalWrite(TRIG, LOW);
+  
+  return pulseIn(ECHO, HIGH, TIMEOUT) * SCALE; // unit: mm
+}
+
+
+void setup() {
+  // initialize GPIO pins
+  pinMode(PIN_LED,OUTPUT);
+  pinMode(PIN_TRIG,OUTPUT);
+  pinMode(PIN_ECHO,INPUT);
+  digitalWrite(PIN_TRIG, LOW);
+
+  // initialize serial port
+  Serial.begin(57600);
+  for (int i = 0; i < MEDIAN_SIZE; i++) {
+    median_readings[i] = 300.0; // _DIST_MAX 또는 적절한 초기값
+  }
+}
+
+void loop() {
+  float dist_raw, dist_median;
+  
+  // wait until next sampling time. 
+  if (millis() < last_sampling_time + INTERVAL)
+    return;
+
+  // get a distance reading from the USS
+  dist_raw = USS_measure(PIN_TRIG,PIN_ECHO);
+
+
+
+
+  median_readings[reading_index] = dist_raw;
+  reading_index = (reading_index + 1) % MEDIAN_SIZE;
+  
+
+  dist_median = get_median_distance(median_readings, MEDIAN_SIZE);
+
+  
+
+  Serial.print("Min:");   Serial.print(_DIST_MIN);
+  Serial.print(",raw:"); Serial.print(dist_raw);
+  Serial.print(",ema:"); Serial.print(0.0); 
+  Serial.print(",median:"); Serial.print(dist_median);
+  Serial.print(",Max:");   Serial.print(_DIST_MAX);
+  Serial.println(""); // 줄 바꿈ㅅㅅ
+
+  // do something here (LED 제어)
+  if ((dist_median < _DIST_MIN) || (dist_median > _DIST_MAX))
+    digitalWrite(PIN_LED, HIGH);      // LED OFF 
+  else
+    digitalWrite(PIN_LED, LOW);       // LED ON
+    
+  // update last sampling time
+  last_sampling_time += INTERVAL;
+}
