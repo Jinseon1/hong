@@ -1,0 +1,109 @@
+// Arduino pin assignment
+#define PIN_LED  9         // PWM 핀 사용 (analogWrite용)
+#define PIN_TRIG 12        // sonar sensor TRIGGER
+#define PIN_ECHO 13        // sonar sensor ECHO
+
+// configurable parameters
+#define SND_VEL 346.0      // sound velocity at 24 celsius degree (unit: m/sec)
+#define INTERVAL 25        // sampling interval (unit: msec)
+#define PULSE_DURATION 10  // ultra-sound Pulse Duration (unit: usec)
+
+// LED 밝기 제어 및 필터링 범위
+#define DIST_MIN 100.0     // 최소 밝기 (analogWrite: 255 - 꺼짐)
+#define DIST_MAX 300.0     // 최소 밝기 (analogWrite: 255 - 꺼짐)
+#define DIST_PEAK 200.0    // 최대 밝기 (analogWrite: 0 - 최대 밝기)
+#define FILTER_SIZE 10     // 이동 평균 필터 크기 (측정값 10개 평균)
+
+// 초음파 센서 계산용
+#define TIMEOUT ((INTERVAL / 2) * 1000.0) // maximum echo waiting time (unit: usec)
+#define SCALE (0.001 * 0.5 * SND_VEL) // coefficent to convert duration to distance
+
+unsigned long last_sampling_time;   // unit: msec
+
+// 이동 평균 필터 배열 및 인덱스
+float distance_readings[FILTER_SIZE]; 
+int reading_index = 0;
+float filtered_distance = DIST_MAX; // 필터링된 최종 거리
+
+// get a distance reading from USS. return value is in millimeter.
+float USS_measure(int TRIG, int ECHO)
+{
+  digitalWrite(TRIG, HIGH);
+  delayMicroseconds(PULSE_DURATION);
+  digitalWrite(TRIG, LOW);
+  
+  // pulseIn()이 0을 반환하면 타임아웃이 발생한 것입니다.
+  // 이 경우 0.0mm가 반환됩니다.
+  return pulseIn(ECHO, HIGH, TIMEOUT) * SCALE; // unit: mm
+}
+
+
+void setup() {
+  pinMode(PIN_LED, OUTPUT); 
+  pinMode(PIN_TRIG, OUTPUT);
+  pinMode(PIN_ECHO, INPUT);
+  digitalWrite(PIN_TRIG, LOW);
+  
+  Serial.begin(115200);
+
+  // 필터 배열 초기화 (초기값을 DIST_MAX로 설정하여 안정성 확보)
+  for (int i = 0; i < FILTER_SIZE; i++) {
+    distance_readings[i] = DIST_MAX;
+  }
+}
+
+
+void loop() { 
+  // wait until next sampling time.
+  if (millis() < (last_sampling_time + INTERVAL))
+    return;
+  
+  // 1. 거리 측정 및 데이터 처리
+  float current_distance = USS_measure(PIN_TRIG, PIN_ECHO);
+  
+  // 0.0mm는 타임아웃을 의미하며, 센서 노이즈나 부정확한 값일 가능성이 높으므로 무시
+  if (current_distance > 0.0) {
+    // 0.0mm가 아닌 유효한 값일 경우에만 배열에 저장
+    distance_readings[reading_index] = current_distance;
+    reading_index = (reading_index + 1) % FILTER_SIZE;
+  }
+  
+  // 2. 이동 평균 필터 적용 (거리 평활화)
+  float total = 0;
+  for (int i = 0; i < FILTER_SIZE; i++) {
+    total += distance_readings[i];
+  }
+  filtered_distance = total / FILTER_SIZE;
+  
+  // 3. LED 밝기 제어
+  int pwm_value = 255; // 기본값: 꺼짐 (analogWrite(255))
+  
+  if (filtered_distance >= DIST_MIN && filtered_distance <= DIST_MAX) {
+    
+    // a) 100mm ~ 200mm 구간 (Active Low: 255(꺼짐) -> 0(최대 밝기))
+    if (filtered_distance <= DIST_PEAK) { 
+      // map(거리, 100, 200, 255, 0)
+      pwm_value = map(filtered_distance, DIST_MIN, DIST_PEAK, 255, 0);
+
+    // b) 200mm ~ 300mm 구간 (Active Low: 0(최대 밝기) -> 255(꺼짐))
+    } else { 
+      // map(거리, 200, 300, 0, 255)
+      pwm_value = map(filtered_distance, DIST_PEAK, DIST_MAX, 0, 255);
+    }
+    
+  } 
+
+  // analogWrite를 사용하여 LED 밝기 제어 (PWM)
+  analogWrite(PIN_LED, pwm_value);
+  
+  // 4. 시리얼 출력 (시리얼 플로터용: 값들을 쉼표로 구분)
+  // Raw Dist, Filtered Dist, PWM 순서로 출력됩니다.
+  Serial.print(current_distance);
+  Serial.print(",");
+  Serial.print(filtered_distance);
+  Serial.print(",");
+  Serial.println(pwm_value); 
+
+  // 5. 마지막 샘플링 시간 업데이트
+  last_sampling_time += INTERVAL;
+}
