@@ -1,0 +1,103 @@
+#include <Servo.h>
+
+#define PIN_LED 9
+#define PIN_SERVO 10
+
+#define _DUTY_MIN 544  
+#define _DUTY_NEU 1500 
+#define _DUTY_MAX 2400
+
+Servo myservo;
+
+float currentAngle = 0.0;
+float targetAngle = 0.0; 
+float servoSpeed = 0.0;  
+
+unsigned long lastUpdateTime = 0; 
+unsigned long startTime = 0;    
+
+const float EPS = 0.5;
+
+void setup() {
+
+  pinMode(PIN_LED, OUTPUT);
+  digitalWrite(PIN_LED, LOW);
+
+  myservo.attach(PIN_SERVO, _DUTY_MIN, _DUTY_MAX);
+  myservo.write((int)round(currentAngle)); 
+
+  Serial.begin(57600);
+  Serial.println("Servo Low Speed Drive Challenge (fixed)");
+  Serial.println("-------------------------------------");
+
+  delay(1000);
+  startChallenge1();
+}
+
+void loop() {
+  unsigned long currentTime = millis();
+
+  if (servoSpeed > 0.0 && currentTime >= lastUpdateTime + 10) {
+    float deltaTime = (currentTime - lastUpdateTime) / 1000.0; 
+    lastUpdateTime = currentTime;
+
+
+    float angleChange = servoSpeed * deltaTime;
+
+    if (currentAngle < targetAngle) {
+      currentAngle += angleChange;
+      if (currentAngle > targetAngle) {
+        currentAngle = targetAngle;
+      }
+    } else if (currentAngle > targetAngle) {
+      currentAngle -= angleChange;
+      if (currentAngle < targetAngle) {
+        currentAngle = targetAngle;
+      }
+    }
+
+    myservo.write((int)round(currentAngle)); 
+
+
+    if (fabs(currentAngle - targetAngle) <= EPS) {
+      unsigned long elapsedMs = currentTime - startTime;
+      Serial.print("Movement to ");
+      Serial.print((int)round(targetAngle));
+      Serial.print(" degrees complete. Total time: ");
+      Serial.print(elapsedMs / 1000.0, 3);
+      Serial.println(" seconds.");
+      servoSpeed = 0.0; 
+
+      if (fabs(targetAngle - 180.0) < 1e-3) { 
+        digitalWrite(PIN_LED, HIGH); 
+        delay(3000); 
+        digitalWrite(PIN_LED, LOW);
+        startChallenge2();
+      } else if (fabs(targetAngle - 90.0) < 1e-3) {
+        digitalWrite(PIN_LED, HIGH); 
+        Serial.println("All challenges complete!");
+        while (true); 
+      }
+    }
+  }
+}
+
+void startChallenge1() {
+  Serial.println("\nStarting Challenge 1: SERVO_SPEED = 3 (180 degrees in 60 seconds)");
+  currentAngle = 0.0;
+  targetAngle = 180.0;
+  servoSpeed = 180.0 / 60.0; 
+  myservo.write((int)round(currentAngle));
+  lastUpdateTime = millis();
+  startTime = millis();
+}
+
+void startChallenge2() {
+  Serial.println("\nStarting Challenge 2: SERVO_SPEED = 0.3 (90 degrees in 300 seconds)");
+  currentAngle = 180.0;
+  targetAngle = 90.0;
+  servoSpeed = 90.0 / 300.0; 
+  myservo.write((int)round(currentAngle));
+  lastUpdateTime = millis();
+  startTime = millis();
+}
