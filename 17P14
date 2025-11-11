@@ -1,0 +1,120 @@
+#include <Servo.h>
+
+
+#define PIN_IR    0         // IR sensor at Pin A0 (0 is A0)
+#define PIN_LED   5        // LED 핀을 D5로 변경 (D9는 서보에 사용 권장)
+#define PIN_SERVO 9        // 서보 핀을 D9로 변경
+
+// 서보 모터 펄스 폭 (Microseconds, writeMicroseconds 사용)
+#define _DUTY_MIN 500     // 0도 (0.5ms)
+#define _DUTY_NEU 1500    // 90도 (1.5ms)
+#define _DUTY_MAX 2500    // 180도 (2.5ms)
+
+// 거리 상수 (mm 단위)
+#define _DIST_MIN  100.0   // 10cm
+#define _DIST_MAX  250.0   // 25cm
+
+// EMA 필터 계수 (안정성 확보를 위해 낮춤)
+#define EMA_ALPHA  0.08
+
+// 루프 주기 (msec)
+#define LOOP_INTERVAL 20
+
+// 센서 특성 보완을 위한 필터 상수 (실제 A0 값 측정 후 조정 필요)
+// 10cm 근처 A0 값 (Blind Spot 오차 발생 지점 방지)
+const int IR_CLOSE_LIMIT_A0 = 150; 
+// 25cm 이상 A0 값 (Long Range 포화 지점 방지)
+const int IR_FAR_LIMIT_A0 = 85; 
+
+
+Servo myservo;
+unsigned long last_loop_time;   // unit: msec
+
+// dist_prev는 EMA 계산에 필요 없으므로 삭제, dist_ema 초기화
+float dist_ema = _DIST_MIN; 
+
+void setup()
+{
+  pinMode(PIN_LED, OUTPUT);
+  
+  myservo.attach(PIN_SERVO); 
+  // 초기 각도는 0도 (최소 각도)로 설정
+  myservo.writeMicroseconds(_DUTY_MIN);
+  
+  Serial.begin(1000000);    // 1,000,000 bps (과제 요구 사항)
+}
+
+// 거리 변환 함수 (IR 센서 A0 값을 mm로 변환)
+float convert_to_dist(float a_value) {
+    if (a_value <= 9.0) return _DIST_MAX + 10.0; // 0 나누기 방지 및 매우 먼 거리로 처리
+    // dist_raw (mm) = ((6762.0 / (a_value - 9.0)) - 4.0) * 10.0 - 60.0;
+    return ((6762.0 / (a_value - 9.0)) - 4.0) * 10.0 - 60.0;
+}
+
+
+void loop()
+{
+  unsigned long time_curr = millis();
+  int duty;
+  float a_value, dist_raw;
+
+  // wait until next event time
+  if (time_curr < (last_loop_time + LOOP_INTERVAL))
+    return;
+  last_loop_time += LOOP_INTERVAL;
+
+  a_value = analogRead(PIN_IR);
+  dist_raw = convert_to_dist(a_value);
+
+  // 1. 범위 필터 (Range Filter) 및 LED 제어
+  if (dist_raw < 0) dist_raw = 1.0; // 음수 거리 방지
+
+  // 센서 특성 기반 필터 적용 (안정성 확보)
+  if (a_value > IR_CLOSE_LIMIT_A0) {
+    // 근접 오차 영역 필터: A0값이 너무 높으면 (가까우면) 10cm 이하로 강제 설정
+    dist_raw = _DIST_MIN - 10.0; // 90mm (9cm)로 강제 설정
+  } else if (a_value < IR_FAR_LIMIT_A0) {
+    // 원거리 포화 필터: A0값이 너무 낮으면 (멀면) 25cm 이상으로 강제 설정
+    dist_raw = _DIST_MAX + 10.0; // 260mm (26cm)로 강제 설정
+  }
+
+
+  // LED 제어 (10cm ~ 25cm 범위)
+  if (dist_raw >= _DIST_MIN && dist_raw <= _DIST_MAX) {
+    digitalWrite(PIN_LED, HIGH);
+  } else {
+    digitalWrite(PIN_LED, LOW);
+  }
+  
+
+  // 2. EMA 필터 (Exponential Moving Average Filter)
+  // y[n] = alpha * x[n] + (1 - alpha) * y[n-1]
+  dist_ema = EMA_ALPHA * dist_raw + (1.0 - EMA_ALPHA) * dist_ema;
+
+  // 3. map() 함수 대체 로직 (100mm~250mm -> 500us~2500us)
+  if (dist_ema <= _DIST_MIN) {
+    duty = _DUTY_MIN;
+  } else if (dist_ema >= _DIST_MAX) {
+    duty = _DUTY_MAX;
+  } else {
+    // (현재거리 - 최소거리) / (최대거리 - 최소거리) 비율 계산
+    float ratio = (dist_ema - _DIST_MIN) / (_DIST_MAX - _DIST_MIN);
+    
+    // 펄스 폭 계산: 최소 듀티 + 비율 * (최대 듀티 - 최소 듀티)
+    duty = _DUTY_MIN + ratio * (_DUTY_MAX - _DUTY_MIN);
+  }
+  
+  // 4. 서보 제어
+  myservo.writeMicroseconds(duty);
+
+  // 5. 시리얼 출력 (과제 요구 사항 포맷)
+  Serial.print("_DUTY_MIN:");  Serial.print(_DUTY_MIN); Serial.print(",");
+  Serial.print("_DIST_MIN:");  Serial.print(_DIST_MIN); Serial.print(",");
+  Serial.print("IR:");        Serial.print(a_value); Serial.print(",");
+  Serial.print("dist_raw:");  Serial.print(dist_raw); Serial.print(",");
+  Serial.print("ema:");       Serial.print(dist_ema); Serial.print(",");
+  Serial.print("servo:");     Serial.print(duty); Serial.print(",");
+  Serial.print("_DIST_MAX:"); Serial.print(_DIST_MAX); Serial.print(",");
+  Serial.print("_DUTY_MAX:"); Serial.print(_DUTY_MAX);
+  Serial.println("");
+}
